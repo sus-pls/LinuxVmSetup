@@ -1,0 +1,134 @@
+#!/bin/bash
+
+set -e
+
+sudo apt update
+sudo apt upgrade -y
+
+if [ "$1" == "" -o "$2" == "" ]; then
+	echo "[X] Syntax Error!"
+	echo "[✔] The Proper Format For This Script is: script.sh username password"
+	exit 1
+fi
+
+username=$1
+password=$2
+sudo useradd -m $username
+
+echo "$username:$password" | sudo chpasswd
+
+echo "[✔] User $username added successfully with the provided password."
+
+sudo usermod -aG sudo $username
+
+if ! getent group sudo | grep -q "$username"; then
+	echo "[X] Unsuccessfully added $username to sudo group"
+	exit 1
+fi
+
+sudo chown -R $username:$username /home/$username
+
+if [ $? -eq 0 ]; then
+	echo "[✔] Chown executed successfully:"
+else
+	echo "[X] Error: Failed to Chown $username"
+fi
+
+sudo -u $username bash -c "sudo ls -la /root"
+
+if [ $? -eq 0 ]; then
+    echo "[✔] Command executed successfully: ls -la /root"
+else
+    echo "[X] Error: Failed to execute 'ls -la /root' with new user"
+fi
+
+current_shell=$(grep "^$username:" /etc/passwd | cut -d: -f7)
+
+if [ "$current_shell" == "/bin/sh" ]; then
+    echo "[!] Changing shell for $username from /bin/sh to /bin/bash"
+    sudo chsh -s /bin/bash $username
+    if [ $? -eq 0 ]; then
+        echo "[✔] Shell changed to /bin/bash for $username."
+    else
+        echo "[X] Failed to change shell for $username."
+        exit 1
+    fi
+else
+    echo "[✔] Shell for $username is already set to $current_shell."
+fi
+
+read -p "Enter you SSH public key: " ssh_key
+
+sudo -u *ADMINUSERHERE* bash -c "mkdir -p /home/*ADMINUSERHERE*/.ssh && touch /home/*ADMINUSERHERE*/.ssh/authorized_keys"
+
+echo "$ssh_key" | sudo tee -a /home/*ADMINUSERHERE*/.ssh/authorized_keys > /dev/null
+
+sudo chmod 700 /home/*ADMINUSERHERE*/.ssh
+sudo chmod 600 /home/*ADMINUSERHERE*/.ssh/authorized_keys
+
+
+echo "[✔] Your SSH public key was added to /home/*ADMINUSERHERE*/.ssh/authorized_keys"
+
+sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+sudo systemctl restart sshd
+
+echo "[✔] SSH configuration updated to enforce key-based authentication only."
+
+sudo -u $username bash -c "mkdir -p ~/.ssh"
+
+read -p "Enter New User's ssh key: " newuser_key
+
+sudo -u $username bash -c "touch /home/$username/.ssh/authorized_keys && echo '$newuser_key' > /home/$username/.ssh/authorized_keys"
+
+sudo chmod 700 /home/$username/.ssh
+sudo chmod 600 /home/$username/.ssh/authorized_keys
+
+sudo -u $username bash -c "sudo echo "$newuser_key" | sudo tee -a /home/$username/.ssh/authorized_keys > /dev/null"
+
+sudo -u $username bash -c "sudo chmod -R go= /home/$username/.ssh"
+
+sudo -u $username bash -c "sudo chown -R $username:$username /home/$username/.ssh"
+
+if ! cat /home/$username/.ssh/authorized_keys | grep -q "$newuser_key"; then
+        echo "[X] Unsuccessfully added $username SSH keys to authorized_keys"
+        exit 1
+fi
+
+sudo wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+
+sudo dpkg -i packages-microsoft-prod.deb
+
+sudo apt-get update
+
+sudo apt install gnupg2 -y
+
+echo "starting mdatp installation"
+
+apt-get install -y apt-transport-https ca-certificates curl
+
+DEBIAN_FRONTEND=noninteractive apt-get install -y mdatp
+
+echo "mdatp installation complete"
+
+sudo apt update
+sudo apt upgrade
+
+sudo chmod +x /opt/atp.py
+
+sudo python3 /opt/atp.py
+
+if [ $? -eq 0 ]; then
+    echo "[✔] Python script executed successfully."
+else
+    echo "[X] Error: Failed to execute the Python script"
+fi
+
+sudo mdatp config real-time-protection --value enabled
+
+if [ $? -eq 0 ]; then
+	echo "[✔] This VM Is ready for $username" exit
+else
+	echo "[X] An Error Has occured" exit
